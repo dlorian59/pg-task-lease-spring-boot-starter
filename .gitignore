@@ -1,0 +1,8 @@
+.gradle/
+build/
+.audit/
+.idea/
+*.iml
+.env
+examples/*/target/
+examples/*/reports/
