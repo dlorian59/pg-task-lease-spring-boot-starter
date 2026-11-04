@@ -6,7 +6,7 @@
 
 A report can outlive an HTTP request or the process that accepted it. Store a task with a stable UUID, let a worker claim it, and produce an idempotent result. The core library supplies the PostgreSQL ownership protocol. This starter adds Spring configuration and the application lifecycle: polling, bounded batches, heartbeat, recovery, handler timeout and fenced acknowledgment.
 
-Your application supplies a PostgreSQL connection configuration and explicit TaskHandlerRegistration beans. There is no annotation scanner or hidden business serializer. Adding the starter alone creates a PgTaskQueue bean when Boot has one unambiguous ConnectionFactory; background processing stays disabled until you opt in. Your own PgTaskQueue and PgTaskWorker beans take precedence.
+Your application supplies a PostgreSQL connection configuration and explicit @PgTaskHandler methods on existing singleton beans or TaskHandlerRegistration beans. There is no classpath scan or hidden business serializer. Adding the starter alone creates a PgTaskQueue bean when Boot has one unambiguous ConnectionFactory; background processing stays disabled until you opt in. Your own PgTaskQueue and PgTaskWorker beans take precedence.
 
 ## Install locally
 
@@ -53,7 +53,22 @@ pg-task-lease.worker.concurrency=2
 
 ## Register business work
 
-A plain @Bean associates a queue with a reactive handler:
+Add @PgTaskHandler("reports") to a public Mono<Void> method(TaskLease) on a normal eagerly created singleton Spring bean:
+
+```java
+@PgTaskHandler("reports")
+public Mono<Void> generate(TaskLease lease) {
+    return reports.generateIdempotently(lease.id(), lease.payload());
+}
+```
+
+The reports collaborator above is your own reactive service. The complete runnable handler is [ReportJobs.java](../../examples/report-worker/src/main/java/example/ReportJobs.java), started by [ReportApplication.java](../../examples/report-worker/src/main/java/example/ReportApplication.java): it writes a deterministic CSV to a file keyed by task UUID, uses a temporary file plus atomic rename, and schedules file I/O on boundedElastic. This makes a retry replace the same report rather than create a second output. Replace the clearly labelled sample totals with a read of your own data.
+
+The annotation registers a handler; it is not an aspect and does not enqueue direct calls. Invocation uses the final Spring bean/proxy, preserving configured @Transactional/@Around advice. Use a reactive transaction manager for reactive transactions. Handler transaction completion and queue acknowledgment remain separate operations.
+
+Public, nonstatic, nonfinal methods with one TaskLease parameter and Mono<Void> return type are required. JDK proxies must expose the method on an interface; class proxies require a proxyable class. Lazy/prototype handlers and FactoryBean products are not automatically discovered; scoped/dynamic proxy targets are rejected. Existing eager singleton beans in the current context are captured at worker start. Direct/self-invocation does not acquire a lease and Spring self-invocation bypasses proxy advice. See the [complete reference and alternatives](reference.en.md).
+
+For manual registration, keep the existing bean form instead of annotating the same queue:
 
 ```java
 @Bean
@@ -62,8 +77,6 @@ TaskHandlerRegistration reportHandler(ReportService reports) {
         reports.generateIdempotently(lease.id(), lease.payload()));
 }
 ```
-
-ReportService above is your application's service returning Mono<Void>. The complete runnable implementation is [ReportApplication.java](../../examples/report-worker/src/main/java/example/ReportApplication.java): it writes a deterministic CSV to a file keyed by task UUID, uses a temporary file plus atomic rename, and schedules file I/O on boundedElastic. This makes a retry replace the same report rather than create a second output. Replace the clearly labelled sample totals with a read of your own data.
 
 Submit through the injected PgTaskQueue:
 
@@ -118,7 +131,7 @@ All worker settings have the prefix pg-task-lease.worker.
 | operation-timeout | 5s | Bounds each queue operation from subscription, including pool wait. |
 | handler-timeout | 5m | Maximum duration of one handler attempt. |
 
-Durations must use whole milliseconds, be positive (retry-delay may be zero), and not exceed 365 days. heartbeat-interval + operation-timeout must be less than lease-time. Invalid values and duplicate queue registrations fail startup. With worker.enabled=true, at least one handler is required. Set pg-task-lease.enabled=false to disable all starter auto-configuration.
+Durations must use whole milliseconds, be positive (retry-delay may be zero), and not exceed 365 days. heartbeat-interval + operation-timeout must be less than lease-time. Invalid values and duplicate queue registrations fail startup. With worker.enabled=true, at least one annotated method or explicit registration is required. Set pg-task-lease.enabled=false to disable all starter auto-configuration.
 
 One batch runs at a time; registrations are visited round-robin. The worker waits for that batch to finish before its next poll. Slow tasks can delay other queues, though independent heartbeat and recovery continue. There is no unbounded tick backlog or local queue of leases awaiting a free processing slot. Size the connection pool for concurrent work, heartbeats and recovery.
 

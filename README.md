@@ -8,7 +8,7 @@
 Run PostgreSQL-backed background jobs with an explicit business handler and Spring configuration. The starter wires pg-task-lease 0.3.0 to Boot's ConnectionFactory and optionally manages the worker lifecycle.
 
 - PgTaskQueue bean with user-bean backoff; no schema changes.
-- Explicit queue/handler registration; no annotation scanning.
+- Register methods with @PgTaskHandler or explicit TaskHandlerRegistration beans; existing Spring AOP proxies are preserved.
 - Opt-in worker with bounded concurrency, polling, heartbeat, expiry recovery and timeouts.
 - Fenced completion after handler success; bounded task retries after handler failure.
 - Cancellation on context shutdown, with ownership and duplicate-effect limits documented.
@@ -26,9 +26,9 @@ cd examples/report-worker
 ./run-demo.sh
 ```
 
-The [report example](examples/report-worker/src/main/java/example/ReportApplication.java) submits a quarterly CSV report, processes it with an explicit handler bean, verifies PostgreSQL DONE plus the file contents, then closes the application. Expected: `REPORT_DONE task=<uuid> attempts=1 path=reports/<uuid>.csv`. Source comments are paired EN/RU.
+The [report example](examples/report-worker/src/main/java/example/ReportApplication.java) submits a quarterly CSV report, processes it with an annotated Spring handler, verifies PostgreSQL DONE plus the file contents, then closes the application. Expected: `REPORT_DONE task=<uuid> attempts=1 path=reports/<uuid>.csv`. Source comments are paired EN/RU.
 
-[Configure and adapt the example →](docs/0.1.0/en.md)
+[Configure and adapt the example →](docs/0.1.0/en.md) · [API and capability map](docs/0.1.0/reference.en.md)
 
 Library coordinates: `io.github.59alex:pg-task-lease-spring-boot-starter:0.1.0`. Local source/Maven Local only; registry and GitHub publication are not completed. [Verification](docs/VERIFICATION.md).
 
@@ -44,7 +44,7 @@ The worker is disabled by default. Apply the core SQL migration explicitly befor
 Фоновые задачи в PostgreSQL с явным бизнес-обработчиком и конфигурацией Spring. Стартер подключает pg-task-lease 0.3.0 к ConnectionFactory из Boot и при включении управляет жизненным циклом работника.
 
 - Bean PgTaskQueue с приоритетом пользовательского bean; схема не изменяется.
-- Явная регистрация очереди и обработчика без сканирования аннотаций.
+- Регистрация методов через @PgTaskHandler или beans TaskHandlerRegistration; существующие AOP-прокси Spring сохраняются.
 - Worker включается отдельно: ограниченные партии, опрос, heartbeat, восстановление и тайм-ауты.
 - Подтверждение с проверкой аренды после успеха; ограниченные повторы после ошибки обработчика.
 - Отмена при закрытии контекста с описанными границами владения и повторных эффектов.
@@ -62,9 +62,9 @@ cd examples/report-worker
 ./run-demo.sh
 ```
 
-[Пример отчёта](examples/report-worker/src/main/java/example/ReportApplication.java) отправляет квартальную CSV-задачу, обрабатывает её через явный bean, проверяет DONE в PostgreSQL и содержимое файла, затем закрывает приложение. Результат: `REPORT_DONE task=<uuid> attempts=1 path=reports/<uuid>.csv`. Комментарии в исходниках идут парами EN/RU.
+[Пример отчёта](examples/report-worker/src/main/java/example/ReportApplication.java) отправляет квартальную CSV-задачу, обрабатывает её через аннотированный Spring-метод, проверяет DONE в PostgreSQL и содержимое файла, затем закрывает приложение. Результат: `REPORT_DONE task=<uuid> attempts=1 path=reports/<uuid>.csv`. Комментарии в исходниках идут парами EN/RU.
 
-[Настройка и применение примера →](docs/0.1.0/ru.md)
+[Настройка и применение примера →](docs/0.1.0/ru.md) · [API и карта возможностей](docs/0.1.0/reference.ru.md)
 
 Координаты: `io.github.59alex:pg-task-lease-spring-boot-starter:0.1.0`. Пока доступны локальные исходники и установка в Maven Local; публикация в реестре и GitHub не завершена. [Проверки](docs/VERIFICATION.md).
 

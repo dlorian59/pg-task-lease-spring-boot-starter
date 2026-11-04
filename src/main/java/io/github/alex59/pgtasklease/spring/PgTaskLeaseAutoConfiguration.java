@@ -2,7 +2,8 @@ package io.github.alex59.pgtasklease.spring;
 
 import io.github.alex59.pgtasklease.PgTaskQueue;
 import io.r2dbc.spi.ConnectionFactory;
-import java.util.List;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.*;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -25,7 +26,10 @@ public class PgTaskLeaseAutoConfiguration {
     @ConditionalOnBean(PgTaskQueue.class)
     @ConditionalOnMissingBean(PgTaskWorker.class)
     @ConditionalOnProperty(prefix = "pg-task-lease.worker", name = "enabled", havingValue = "true")
-    PgTaskWorker pgTaskWorker(PgTaskQueue queue, PgTaskLeaseProperties properties, List<TaskHandlerRegistration> handlers) {
-        return new PgTaskWorker(queue, properties.worker(), handlers);
+    PgTaskWorker pgTaskWorker(PgTaskQueue queue, PgTaskLeaseProperties properties,
+                             ObjectProvider<TaskHandlerRegistration> handlers, ConfigurableListableBeanFactory beans) {
+        // SmartLifecycle starts after eager singletons and their AOP proxies have been initialized.
+        return new PgTaskWorker(queue, properties.worker(),
+                () -> TaskHandlerMethods.discover(beans, handlers.orderedStream().toList()));
     }
 }

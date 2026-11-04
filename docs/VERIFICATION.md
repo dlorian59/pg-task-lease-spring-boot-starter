@@ -41,3 +41,19 @@ The existing Docker image store was unavailable, so actual database checks used 
 Java 27's configured local toolchain link points to a missing binary. Java 21 and 27 were not exercised for this starter; no toolchains were downloaded or repaired. Java 17 and 25 were exercised. Java 25 emitted an upstream Netty native-access warning without failing the checks.
 
 This is functional verification, not a throughput/HA/network-partition benchmark. Handler cancellation cannot undo external effects; stop does not await uncooperative work. A queue operation can commit despite a timeout or lost response. Idempotency, domain/outbox transactions, database durability and terminal-row retention remain application responsibilities.
+
+## OSS-009 — annotation registration and documentation audit
+
+Local verification on 2026-11-05 used Java 17.0.21, Spring Boot 4.1.2 and an isolated PostgreSQL 17.6 process. The new registration path was checked on Java 17; the earlier Java 25 results above predate this addition.
+
+| Check | Result |
+|---|---|
+| Build, Javadoc and local artifact installation | Passed with --release 17; sources/Javadoc/POM/module artifacts installed into an isolated Maven Local directory. |
+| Seven unit tests | Existing four configuration tests plus three registration scenarios passed. New checks exercise JDK and CGLIB advice, deferred invocation, awaited asynchronous completion, original synchronous/asynchronous errors, cancellation, invalid signatures/final methods, inaccessible proxy methods, dynamic targets and duplicate queues. |
+| Four worker integration scenarios | Passed again on a fresh PostgreSQL database after the worker gained deferred registration discovery. Polling, heartbeat, recovery, retry, bounded concurrency and stop behavior remain covered. |
+| Independent Maven consumer | A fresh copy of the report application was packaged against the installed artifacts. Its @PgTaskHandler component was discovered by actual Boot startup; REPORT_DONE, durable DONE state and exact CSV content were checked before successful exit. |
+| Documentation coverage | EN/RU API-to-code-to-limits tables cover all public core operations/records and starter registration, properties, lifecycle, schema, retention and reliability. Existing guides link to these references. |
+
+Annotation registration preserves configured Spring proxy advice; no new aspect or automatic transaction is installed. Tests verify the interceptor path, not a claim of domain-write/queue-ack transaction atomicity. Lazy/prototype beans, FactoryBean products and parent-context handlers are outside automatic discovery; explicit registration remains available. The native fixture was stopped after verification. No core SQL, production database, remote repository or registry was changed.
+
+Проверка OSS-009: на Java 17 повторно прошли семь модульных тестов, четыре сценария с изолированным PostgreSQL и отдельное Maven-приложение с @PgTaskHandler. Подтверждены вызов через JDK/CGLIB-прокси, ожидание завершения, ошибки, отмена, валидация регистрации и точный результат CSV. Это не проверка атомарной транзакции между доменной записью и подтверждением очереди. Результаты Java 25 выше относятся к предыдущей реализации. Справочники API и ограничений доступны на обоих языках.

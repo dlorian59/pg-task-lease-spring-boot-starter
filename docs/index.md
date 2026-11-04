@@ -11,3 +11,5 @@
 These are repository Markdown guides. The runnable example is application source, not a documentation website.
 
 Это Markdown-руководства в репозитории. Исполняемый пример содержит исходники приложения, а не сайт документации.
+
+API/capability map / API и карта возможностей: [EN](0.1.0/reference.en.md) · [RU](0.1.0/reference.ru.md).

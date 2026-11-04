@@ -5,6 +5,7 @@ import io.github.alex59.pgtasklease.TaskLease;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
@@ -21,7 +22,7 @@ public class PgTaskWorker implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(PgTaskWorker.class);
     private final PgTaskQueue queue;
     private final PgTaskLeaseProperties.Worker settings;
-    private final List<TaskHandlerRegistration> handlers;
+    private final Supplier<List<TaskHandlerRegistration>> handlersSource;
     private volatile Session current;
 
     /**
@@ -31,18 +32,33 @@ public class PgTaskWorker implements SmartLifecycle {
      * @param handlers unique explicit queue registrations
      */
     public PgTaskWorker(PgTaskQueue queue, PgTaskLeaseProperties.Worker settings, List<TaskHandlerRegistration> handlers) {
+        this(queue, settings, fixedHandlers(handlers));
+    }
+
+    PgTaskWorker(PgTaskQueue queue, PgTaskLeaseProperties.Worker settings,
+                 Supplier<List<TaskHandlerRegistration>> handlersSource) {
         this.queue = Objects.requireNonNull(queue, "queue");
         this.settings = Objects.requireNonNull(settings, "settings");
-        this.handlers = List.copyOf(handlers);
-        if (this.handlers.isEmpty()) throw new IllegalArgumentException("An enabled worker requires at least one TaskHandlerRegistration bean");
+        this.handlersSource = Objects.requireNonNull(handlersSource, "handlersSource");
+    }
+
+    private static Supplier<List<TaskHandlerRegistration>> fixedHandlers(List<TaskHandlerRegistration> handlers) {
+        var validated = validateHandlers(handlers);
+        return () -> validated;
+    }
+
+    private static List<TaskHandlerRegistration> validateHandlers(List<TaskHandlerRegistration> handlers) {
+        var validated = List.copyOf(handlers);
+        if (validated.isEmpty()) throw new IllegalArgumentException("An enabled worker requires TaskHandlerRegistration beans or @PgTaskHandler methods");
         var names = new HashSet<String>();
-        for (var handler : this.handlers) if (!names.add(handler.queue()))
+        for (var handler : validated) if (!names.add(handler.queue()))
             throw new IllegalArgumentException("Duplicate handler for queue " + handler.queue());
+        return validated;
     }
 
     @Override public synchronized void start() {
         if (isRunning()) return;
-        var session = new Session();
+        var session = new Session(validateHandlers(handlersSource.get()));
         current = session;
         session.subscriptions.add(Mono.defer(() -> poll(session))
                 .repeatWhen(completed -> completed.delayElements(settings.pollInterval()))
@@ -66,7 +82,7 @@ public class PgTaskWorker implements SmartLifecycle {
 
     private Mono<Void> poll(Session session) {
         if (!active(session)) return Mono.empty();
-        var registration = handlers.get(session.nextQueue++ % handlers.size());
+        var registration = session.handlers.get(session.nextQueue++ % session.handlers.size());
         if (session.nextQueue == Integer.MAX_VALUE) session.nextQueue = 0;
         return queue.claim(registration.queue(), settings.owner(), settings.concurrency(), settings.leaseTime())
                 .timeout(settings.operationTimeout())
@@ -101,7 +117,7 @@ public class PgTaskWorker implements SmartLifecycle {
     }
 
     private Mono<Void> recover(Session session) {
-        return Flux.fromIterable(handlers).concatMap(registration -> {
+        return Flux.fromIterable(session.handlers).concatMap(registration -> {
             if (!active(session)) return Mono.empty();
             return queue.recoverExpired(registration.queue(), settings.recoveryBatchSize(), settings.retryDelay())
                     .timeout(settings.operationTimeout())
@@ -115,7 +131,9 @@ public class PgTaskWorker implements SmartLifecycle {
     }
     private static final class Session {
         final Disposable.Composite subscriptions = Disposables.composite();
+        final List<TaskHandlerRegistration> handlers;
         int nextQueue;
+        Session(List<TaskHandlerRegistration> handlers) { this.handlers = handlers; }
     }
     private static final class LostLease extends IllegalStateException { }
 }
