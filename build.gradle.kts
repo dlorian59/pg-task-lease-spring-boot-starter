@@ -33,9 +33,9 @@ publishing {
             pom {
                 name.set("pg-task-lease-spring-boot-starter")
                 description.set("Spring Boot integration and an opt-in bounded worker for PostgreSQL task leases")
-                url.set("https://github.com/59Alex/pg-task-lease-spring-boot-starter")
+                url.set("https://github.com/dlorian59/pg-task-lease-spring-boot-starter")
                 licenses { license { name.set("MIT"); url.set("https://opensource.org/licenses/MIT") } }
-                developers { developer { id.set("59Alex"); name.set("Aleksandr Kashevarov") } }
+                developers { developer { id.set("dlorian59"); name.set("Aleksandr Kashevarov") } }
             }
         }
     }

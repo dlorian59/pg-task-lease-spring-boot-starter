@@ -22,7 +22,7 @@ jobs:
           path: starter
       - uses: actions/checkout@v4
         with:
-          repository: 59Alex/pg-task-lease
+          repository: dlorian59/pg-task-lease
           path: core
       - uses: actions/setup-java@v4
         with:

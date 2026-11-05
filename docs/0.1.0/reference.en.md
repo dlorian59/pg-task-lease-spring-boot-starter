@@ -13,7 +13,7 @@
 | Lifecycle / PgTaskWorker | [worker](../../src/main/java/io/github/alex59/pgtasklease/spring/PgTaskWorker.java), [application main](../../examples/report-worker/src/main/java/example/ReportApplication.java) | Reactor subscriptions are owned; external effects/threads are not forcibly stopped. |
 | Awaited result, retry and fencing | [PostgreSQL worker checks](../../src/test/java/io/github/alex59/pgtasklease/spring/WorkerIntegrationTest.java) | Handler completion precedes ack; unknown DB outcome is not rollback; maxAttempts counts claims. |
 | Existing AOP advice | [JDK/CGLIB proxy checks](../../src/test/java/io/github/alex59/pgtasklease/spring/HandlerMethodsTest.java) | Invokes proxy, not raw target; caller configures advice/transaction manager. |
-| Schema and retention | [migration](../../examples/report-worker/schema.sql), [core API](https://github.com/59Alex/pg-task-lease) | Apply migration explicitly; own terminal-row cleanup. Deletion removes UUID deduplication history. |
+| Schema and retention | [migration](../../examples/report-worker/schema.sql), [core API](https://github.com/dlorian59/pg-task-lease) | Apply migration explicitly; own terminal-row cleanup. Deletion removes UUID deduplication history. |
 
 ## Registration and AOP boundary
 

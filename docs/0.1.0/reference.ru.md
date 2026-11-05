@@ -13,7 +13,7 @@
 | Lifecycle / PgTaskWorker | [Worker](../../src/main/java/io/github/alex59/pgtasklease/spring/PgTaskWorker.java), [main приложения](../../examples/report-worker/src/main/java/example/ReportApplication.java) | Worker владеет подписками Reactor; внешние эффекты и потоки принудительно не останавливает. |
 | Ожидание результата, повторы и fencing | [Проверки PostgreSQL](../../src/test/java/io/github/alex59/pgtasklease/spring/WorkerIntegrationTest.java) | Обработчик завершается до ack; неизвестный исход SQL не означает rollback; maxAttempts считает захваты. |
 | Существующий AOP | [Проверки JDK/CGLIB](../../src/test/java/io/github/alex59/pgtasklease/spring/HandlerMethodsTest.java) | Вызывается proxy, а не raw target; аспекты и transaction manager настраивает приложение. |
-| Схема и хранение | [Миграция](../../examples/report-worker/schema.sql), [Core API](https://github.com/59Alex/pg-task-lease) | Миграция явная; очистка терминальных задач принадлежит приложению. Удаление сбрасывает историю дедупликации UUID. |
+| Схема и хранение | [Миграция](../../examples/report-worker/schema.sql), [Core API](https://github.com/dlorian59/pg-task-lease) | Миграция явная; очистка терминальных задач принадлежит приложению. Удаление сбрасывает историю дедупликации UUID. |
 
 ## Граница регистрации и AOP
 
