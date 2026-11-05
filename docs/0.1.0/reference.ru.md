@@ -7,8 +7,8 @@
 | Возможность / публичный API | Исполняемый код или реализация | Ограничения |
 |---|---|---|
 | Внедрение очереди / PgTaskLeaseAutoConfiguration | [ReportApplication](../../examples/report-worker/src/main/java/example/ReportApplication.java), [конфигурация](../../src/main/java/io/github/alex59/pgtasklease/spring/PgTaskLeaseAutoConfiguration.java) | Нужен однозначный ConnectionFactory; пользовательские queue/worker имеют приоритет; DDL нет. |
-| Регистрация аннотацией / @PgTaskHandler(value) | [ReportJobs.generate](../../examples/report-worker/src/main/java/example/ReportJobs.java) | Имя очереди — литерал; public nonstatic nonfinal Mono<Void>(TaskLease); один обработчик на очередь. |
-| Ручная регистрация / TaskHandlerRegistration(queue, handler) | [Альтернатива](ru.md#регистрация-бизнес-обработчика), [record](../../src/main/java/io/github/alex59/pgtasklease/spring/TaskHandlerRegistration.java) | Конструктор проверяет имя и функцию; выбирайте её ИЛИ аннотацию для каждой очереди. |
+| Регистрация аннотацией / @PgTaskHandler(value, blocking=false) | [ReportJobs.generate](../../examples/report-worker/src/main/java/example/ReportJobs.java) | Имя очереди — литерал; public nonstatic nonfinal Mono<Void>(TaskLease) либо void(TaskLease) с blocking=true; один обработчик на очередь. |
+| Ручная регистрация / TaskHandlerRegistration(queue, handler) | [Альтернатива](ru.md#register-business-work), [record](../../src/main/java/io/github/alex59/pgtasklease/spring/TaskHandlerRegistration.java) | Конструктор проверяет имя и функцию; выбирайте её ИЛИ аннотацию для каждой очереди. |
 | Настройки / PgTaskLeaseProperties(enabled, worker) | [Полная таблица](ru.md#контракт-и-настройки), [properties](../../src/main/java/io/github/alex59/pgtasklease/spring/PgTaskLeaseProperties.java) | Глобальный enabled по умолчанию true, worker.enabled — false. Проверяются все длительности и лимиты. |
 | Lifecycle / PgTaskWorker | [Worker](../../src/main/java/io/github/alex59/pgtasklease/spring/PgTaskWorker.java), [main приложения](../../examples/report-worker/src/main/java/example/ReportApplication.java) | Worker владеет подписками Reactor; внешние эффекты и потоки принудительно не останавливает. |
 | Ожидание результата, повторы и fencing | [Проверки PostgreSQL](../../src/test/java/io/github/alex59/pgtasklease/spring/WorkerIntegrationTest.java) | Обработчик завершается до ack; неизвестный исход SQL не означает rollback; maxAttempts считает захваты. |
@@ -45,3 +45,7 @@ TaskHandlerRegistration принимает непустую очередь до 
 At-least-once попытки зависят от сохранённых строк, работников/восстановления и долговечности базы. Бюджет повторов конечен. Fencing защищает состояние очереди, а не внешние эффекты. Храните компактные ссылки в payload, делайте обработчики идемпотентными и поддерживающими отмену; явно управляйте миграциями, лимитами пула, наблюдением и хранением.
 
 [Руководство](ru.md) · [Проверки](../VERIFICATION.md) · [README](../../README.md)
+
+## Явные блокирующие обработчики
+
+blocking по умолчанию false. blocking=true разрешён только для void(TaskLease). Стартер выполняет конечный proxy-вызов на общем boundedElastic; возврат означает окончание бизнес-работы. Прерывание требует участия кода и не является откатом. Mono с blocking=true или void без него отклоняется при регистрации. См. [разбор обработчика](ru.md#register-business-work) и [полный исходник](../../examples/report-worker/src/main/java/example/ReportJobs.java).

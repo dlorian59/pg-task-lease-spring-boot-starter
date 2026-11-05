@@ -72,6 +72,48 @@ class HandlerMethodsTest {
         assertThrows(IllegalArgumentException.class, () -> new PgTaskWorker(new PgTaskQueue(factory), properties, registrations));
     }
 
+    @Test void blockingHandlerRunsLazilyThroughProxyOffCallerThreadAndSupportsInterruption() throws Exception {
+        var target = new BlockingJob();
+        var advice = new AtomicInteger();
+        var proxy = new ProxyFactory(target);
+        proxy.setProxyTargetClass(true);
+        proxy.addAdvice((MethodInterceptor) invocation -> { advice.incrementAndGet(); return invocation.proceed(); });
+        var publisher = registration(proxy.getProxy()).handler().apply(lease());
+        assertEquals(0, advice.get());
+        var subscription = publisher.subscribe();
+        assertTrue(target.started.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(1, advice.get());
+        assertNotSame(Thread.currentThread(), target.thread);
+        subscription.dispose();
+        assertTrue(target.interrupted.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        var failing = new BlockingFailure();
+        assertSame(failing.failure, assertThrows(IllegalArgumentException.class,
+                () -> registration(failing).handler().apply(lease()).block(java.time.Duration.ofSeconds(2))));
+        assertThrows(IllegalArgumentException.class, () -> registration(new WrongBlockingResult()));
+        assertThrows(IllegalArgumentException.class, () -> registration(new UnmarkedVoid()));
+    }
+
+    public static class BlockingJob {
+        final java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch interrupted = new java.util.concurrent.CountDownLatch(1);
+        volatile Thread thread;
+        @PgTaskHandler(value = "reports", blocking = true) public void handle(TaskLease lease) {
+            thread = Thread.currentThread(); started.countDown();
+            try { new java.util.concurrent.CountDownLatch(1).await(); }
+            catch (InterruptedException expected) { Thread.currentThread().interrupt(); interrupted.countDown(); }
+        }
+    }
+    public static class BlockingFailure {
+        final IllegalArgumentException failure = new IllegalArgumentException("business failure");
+        @PgTaskHandler(value = "reports", blocking = true) public void handle(TaskLease lease) { throw failure; }
+    }
+    public static class WrongBlockingResult {
+        @PgTaskHandler(value = "reports", blocking = true) public Mono<Void> handle(TaskLease lease) { return Mono.empty(); }
+    }
+    public static class UnmarkedVoid {
+        @PgTaskHandler("reports") public void handle(TaskLease lease) { }
+    }
+
     private static TaskHandlerRegistration registration(Object bean) {
         var factory = new DefaultListableBeanFactory();
         factory.registerSingleton("job", bean);

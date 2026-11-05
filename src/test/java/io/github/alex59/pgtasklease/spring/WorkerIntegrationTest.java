@@ -123,6 +123,36 @@ class WorkerIntegrationTest {
         assertEquals("Handler failed: TimeoutException", queue.find(timeout.id()).block(WAIT).lastError());
     }
 
+    @Test void annotatedBlockingWorkKeepsHeartbeatWhileRunningAndAcknowledgesOnlyAfterReturn() {
+        var request = TaskRequest.ready(UUID.randomUUID(), "blocking-report", "2026-Q4").withMaxAttempts(2);
+        assertTrue(queue.submit(request).block(WAIT));
+        assertFalse(queue.submit(request.withPriority(99)).block(WAIT));
+        var handler = new BlockingReport();
+        var beans = new org.springframework.beans.factory.support.DefaultListableBeanFactory();
+        beans.registerSingleton("report", handler);
+        worker = new PgTaskWorker(queue, settings(1, Duration.ofSeconds(4)), TaskHandlerMethods.discover(beans, List.of()));
+        worker.start();
+        await(() -> handler.started.get() != null);
+        var acquired = handler.started.get();
+        Mono.delay(Duration.ofMillis(850)).block(WAIT);
+        var pending = queue.find(request.id()).block(WAIT);
+        assertEquals(TaskState.LEASED, pending.state());
+        assertEquals(0, acquired.priority(), "Duplicate submission must not overwrite the original");
+        assertTrue(pending.expiresAt().isAfter(acquired.expiresAt()));
+        handler.release.countDown();
+        await(() -> state(request) == TaskState.DONE);
+        assertEquals(1, queue.find(request.id()).block(WAIT).attempts());
+    }
+    public static class BlockingReport {
+        final AtomicReference<TaskLease> started = new AtomicReference<>();
+        final java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        @PgTaskHandler(value = "blocking-report", blocking = true)
+        public void create(TaskLease lease) throws InterruptedException {
+            started.set(lease);
+            if (!release.await(3, java.util.concurrent.TimeUnit.SECONDS)) throw new IllegalStateException("Test did not release handler");
+        }
+    }
+
     static PgTaskLeaseProperties.Worker settings(int concurrency, Duration handlerTimeout) {
         return new PgTaskLeaseProperties.Worker(true, "integration-worker", concurrency, Duration.ofMillis(20),
                 Duration.ofMillis(600), Duration.ofMillis(80), Duration.ofMillis(50), 10, Duration.ZERO,

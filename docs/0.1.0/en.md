@@ -1,59 +1,72 @@
-# 0.1.0 — run background reports with Spring Boot
+# 0.1.0 — Background reports in an existing Spring application
 
 [Versions](../index.md) · [English](en.md) · [Русский](ru.md) · [README](../../README.md)
 
-## The problem and what the starter removes
+A report request should return promptly while the report survives a process restart. The starter lets your application submit a task and write one business method. Start with the [complete dependency, YAML, controller and service integration](../../README.md). This guide explains which decisions belong to the application and how to adapt the working example.
 
-A report can outlive an HTTP request or the process that accepted it. Store a task with a stable UUID, let a worker claim it, and produce an idempotent result. The core library supplies the PostgreSQL ownership protocol. This starter adds Spring configuration and the application lifecycle: polling, bounded batches, heartbeat, recovery, handler timeout and fenced acknowledgment.
+## Choose this integration
 
-Your application supplies a PostgreSQL connection configuration and explicit @PgTaskHandler methods on existing singleton beans or TaskHandlerRegistration beans. There is no classpath scan or hidden business serializer. Adding the starter alone creates a PgTaskQueue bean when Boot has one unambiguous ConnectionFactory; background processing stays disabled until you opt in. Your own PgTaskQueue and PgTaskWorker beans take precedence.
+Use the starter when your Spring application already uses PostgreSQL and needs bounded background work: reports, exports or notifications. No separate broker is required. It targets Java 17+ and Boot 4.1.2; the HTTP example is WebFlux. A headless Boot application can omit the WebFlux dependency and controller. The queue still uses an R2DBC ConnectionFactory, even if the business handler uses JDBC. A JDBC DataSource alone is insufficient.
 
-## Install locally
+The starter does not move an arbitrary annotated call into a queue. Producers explicitly submit; the worker invokes the registered method later. The baseline works on Java 17, 21 and 25 LTS; optional Java 27 does not change the API or require preview features. Local artifact preparation and runnable verification are in [development](../../CONTRIBUTING.md).
 
-Requires JDK 17+, Maven 3.8+, and the two source checkouts side by side. Spring Boot 4.1.2 is selected; the core dependency is pg-task-lease 0.3.0.
+<a id="http-to-file-walkthrough"></a>
+## HTTP to file walkthrough
 
-```bash
-cd pg-task-lease
-./gradlew publishToMavenLocal
-cd ../pg-task-lease-spring-boot-starter
-./gradlew build publishToMavenLocal
+The [complete consumer](../../examples/report-worker) includes Maven and Gradle builds. Copy the application classes beneath your existing application scan package; do not add a second main class to your service.
+
+1. Apply [schema.sql](../../examples/report-worker/schema.sql) once through your migration tool. Configure the R2DBC URL and credentials, with SELECT/INSERT/UPDATE access on public.pg_task_lease. Leave schema initialization disabled.
+2. Add [application.yml](../../examples/report-worker/src/main/resources/application.yml). Only worker.enabled is needed beyond database configuration: defaults already supply polling, concurrency, heartbeat, retry and timeout budgets.
+3. Add [ReportService](../../examples/report-worker/src/main/java/example/ReportService.java) and [ReportController](../../examples/report-worker/src/main/java/example/ReportController.java). PUT /reports/{uuid}?quarter=2026-Q4 returns 202 after the database accepts the task. Repeating that UUID and quarter returns 202 without another row; changing the quarter also returns 202 without changing the original task. Invalid quarters return 400.
+4. Add [ReportJobs](../../examples/report-worker/src/main/java/example/ReportJobs.java). The handler writes reports/{uuid}.csv. GET /reports/{uuid} returns a state; DONE means the handler returned and queue acknowledgment succeeded. Missing tasks return 404.
+5. Adapt sample totals, destination and access checks. The sample uses a local directory and fixed data to make the result verifiable. Multi-host workers need an appropriate shared or external output destination. A mutable report dataset needs a persisted snapshot/version if retries must reproduce identical bytes.
+
+[ReportVerification](../../examples/report-worker/src/main/java/example/ReportVerification.java) is a separate, opt-in finite check. It performs actual HTTP submission, duplicate requests, including a changed duplicate, waits for DONE, then checks exact CSV content and one attempt. Normal hosting stays running. This check is not needed in your application's source.
+
+The file rename is atomic on a supported local filesystem; it is not a durability promise after storage failure. File success followed by a lost acknowledgment may cause a repeat. Keying output by task UUID avoids a second name; the application must also make contents and downstream effects safe to repeat.
+
+<a id="submission-and-duplicates"></a>
+## Submission and duplicates
+
+```java
+queue.submit(TaskRequest.ready(id, "reports", "2026-Q4"));
 ```
 
-Coordinates for a Boot application:
+TaskRequest.ready keeps the caller's UUID, priority 0, maxAttempts 5 and delay zero. submit returns true for a new row or false for an existing UUID. The original row is not overwritten and the UUID is global across queues. The [service](../../examples/report-worker/src/main/java/example/ReportService.java) checks that a duplicate belongs to reports. Core preserves the first content and does not compare business content; the caller must keep each UUID bound to one immutable request.
 
-```xml
-<dependency>
-  <groupId>io.github.59alex</groupId>
-  <artifactId>pg-task-lease-spring-boot-starter</artifactId>
-  <version>0.1.0</version>
-</dependency>
-<dependency>
-  <groupId>org.postgresql</groupId>
-  <artifactId>r2dbc-postgresql</artifactId>
-  <scope>runtime</scope>
-</dependency>
+Retain the UUID before the first attempt. If a response is lost, retry with the same UUID and content. A new random UUID for each network attempt creates new tasks. Concurrent retention can remove deduplication history; keep terminal rows for at least your required retry window. The sample's duplicate lookup can return 404 if a task was removed between submission and lookup.
+
+Returning a Mono from the controller lets WebFlux subscribe. Calling submit without subscribing does nothing. Do not hide a fire-and-forget subscribe in your service: it disconnects acceptance from the HTTP result. A request cancellation can occur after database commit, so an HTTP failure is not proof the task was not stored.
+
+<a id="task-choices"></a>
+## Task choices
+
+```java
+var request = TaskRequest.ready(id, "reports", quarter)
+        .withPriority(10)
+        .withMaxAttempts(2)
+        .withDelay(Duration.ofMinutes(5));
 ```
 
-The Boot BOM manages the driver version. This is a local Maven installation; registry publication is not claimed.
+Each override returns a new validated request. The original stays unchanged. Priority is a numeric preference at claim time, not a total execution ordering across workers. Higher numbers are preferred; sustained high-priority traffic can starve other work. Delay uses PostgreSQL time. maxAttempts limits claims, including attempts interrupted by a crash; it is not a count of successful handler invocations.
 
-## Configure the database and enable processing
+Use a delay for scheduled exports and a smaller attempt budget for nontransient failures. Error classification and a new administrative retry after DEAD remain application policy. Five attempts are a starting default, not an availability guarantee. Request delay is initial availability; worker.retry-delay applies after failure or recovery.
 
-Apply [schema.sql](../../examples/report-worker/schema.sql) once through your migration tool before enabling workers. It creates the core queue table and indexes. The starter does not execute DDL, drop tables or automatically initialize a database. The application role needs SELECT, INSERT and UPDATE on public.pg_task_lease. Queue names are logical selection scopes, not database access controls.
-
-```properties
-spring.r2dbc.url=${TASKS_R2DBC_URL}
-spring.r2dbc.username=${TASKS_DB_USER}
-spring.r2dbc.password=${TASKS_DB_PASSWORD}
-spring.r2dbc.pool.max-size=8
-spring.r2dbc.pool.initial-size=0
-spring.sql.init.mode=never
-pg-task-lease.worker.enabled=true
-pg-task-lease.worker.concurrency=2
-```
-
+<a id="register-business-work"></a>
 ## Register business work
 
-Add @PgTaskHandler("reports") to a public Mono<Void> method(TaskLease) on a normal eagerly created singleton Spring bean:
+For ordinary blocking file/JDBC code, use the full [CSV handler](../../examples/report-worker/src/main/java/example/ReportJobs.java):
+
+```java
+@PgTaskHandler(value = "reports", blocking = true)
+public void generate(TaskLease lease) throws IOException
+```
+
+This is a method declaration excerpt; its complete body and imports are in the linked source. The starter wraps invocation in a cold publisher and schedules it on shared boundedElastic. Registration does not run the method. The worker awaits normal return before acknowledgment, handles a thrown exception as an attempt failure, and renews the lease independently. Shared scheduler saturation can consume handler timeout while waiting; bound business concurrency and size dependent resources appropriately. The starter does not own or dispose Reactor's shared scheduler.
+
+Cancellation requests interruption; Java code, filesystem calls or remote clients may ignore it. Such work may finish after shutdown or lease loss. Never treat interruption as rollback, and configure downstream timeouts/idempotency. The worker's concurrency bounds subscribed attempts, not indefinitely continuing noncooperative external work.
+
+For reactive business work, keep the original default contract:
 
 ```java
 @PgTaskHandler("reports")
@@ -62,56 +75,9 @@ public Mono<Void> generate(TaskLease lease) {
 }
 ```
 
-The reports collaborator above is your own reactive service. The complete runnable handler is [ReportJobs.java](../../examples/report-worker/src/main/java/example/ReportJobs.java), started by [ReportApplication.java](../../examples/report-worker/src/main/java/example/ReportApplication.java): it writes a deterministic CSV to a file keyed by task UUID, uses a temporary file plus atomic rename, and schedules file I/O on boundedElastic. This makes a retry replace the same report rather than create a second output. Replace the clearly labelled sample totals with a read of your own data.
+Here reports is your application's reactive collaborator. Return completion only after the effect finishes; do not perform blocking work while constructing a publisher. The starter does not change the scheduler of a reactive handler. An explicit TaskHandlerRegistration("reports", lease -> ...) bean remains available for programmatic registration; choose it OR an annotation per queue.
 
-The annotation registers a handler; it is not an aspect and does not enqueue direct calls. Invocation uses the final Spring bean/proxy, preserving configured @Transactional/@Around advice. Use a reactive transaction manager for reactive transactions. Handler transaction completion and queue acknowledgment remain separate operations.
-
-Public, nonstatic, nonfinal methods with one TaskLease parameter and Mono<Void> return type are required. JDK proxies must expose the method on an interface; class proxies require a proxyable class. Lazy/prototype handlers and FactoryBean products are not automatically discovered; scoped/dynamic proxy targets are rejected. Existing eager singleton beans in the current context are captured at worker start. Direct/self-invocation does not acquire a lease and Spring self-invocation bypasses proxy advice. See the [complete reference and alternatives](reference.en.md).
-
-For manual registration, keep the existing bean form instead of annotating the same queue:
-
-```java
-@Bean
-TaskHandlerRegistration reportHandler(ReportService reports) {
-    return new TaskHandlerRegistration("reports", lease ->
-        reports.generateIdempotently(lease.id(), lease.payload()));
-}
-```
-
-Submit through the injected PgTaskQueue:
-
-```java
-Mono<Boolean> accepted = queue.submit(new TaskRequest(
-    stableRequestId, "reports", "2026-Q4", 0, 3, Duration.ZERO));
-```
-
-Persist stableRequestId in your producer workflow and reuse it on submission retry. Subscribe through your request or application lifecycle. A generated new ID on every transport retry creates separate tasks. In the sample, ApplicationRunner submits once and waits at the command-line boundary for DONE plus the expected file contents.
-
-## Run the actual example
-
-After the local installations above, with Docker available:
-
-```bash
-cd examples/report-worker
-./run-demo.sh
-```
-
-The script creates a fresh PostgreSQL instance on a dynamic loopback port, explicitly applies the migration, builds the Boot application using Maven Local, runs it, and stops its own container on exit. Demo credentials only belong to that disposable instance.
-
-Expected final application output:
-
-```text
-REPORT_DONE task=<uuid> attempts=1 path=reports/<uuid>.csv
-```
-
-Expected file contents:
-
-```csv
-quarter,invoices,total
-2026-Q4,3,450.00
-```
-
-The application verifies the durable DONE state and exact CSV contents before exiting. The sample is finite; in a server application Spring's context remains open and the same worker continues polling. If Docker is unavailable, prepare an isolated PostgreSQL database yourself, apply schema.sql, set TASKS_R2DBC_URL, TASKS_DB_USER and TASKS_DB_PASSWORD, then run `mvn package` and `java -jar target/report-worker-0.1.0.jar` from the example directory.
+Methods must be public, nonstatic and nonfinal on eager singleton beans. blocking=true requires void; default mode requires Mono<Void>. Both take one TaskLease. Discovery occurs when the worker starts, after proxies exist. Proxy invocation preserves configured Spring advice. A JDBC @Transactional void handler can finish its business transaction before queue acknowledgment; a reactive handler needs an appropriate reactive transaction manager. Neither mode combines domain changes and queue operations into one transaction. Direct/self-invocation does not acquire a lease. [Proxy limits and registration alternatives](reference.en.md).
 
 ## Operational contract and settings
 
@@ -151,3 +117,9 @@ At-least-once attempts require retained task rows, live workers/recovery and Pos
 - DEAD task: inspect attempts and lastError, fix the business cause, then submit a deliberately new task under your own retry policy.
 
 [Verification](../VERIFICATION.md) · [Version index](../index.md) · [README](../../README.md)
+
+## What to retain
+
+A stable task ID prevents duplicate submissions while its row exists. A current lease permits queue transitions; it does not authorize or deduplicate another system. The worker owns polling and cancellation, while the application owns business data, migrations, authorization and output idempotency. Defaults remove setup code; tune them only against actual handler and dependency budgets.
+
+[Reactor scheduling](https://projectreactor.io/docs/core/release/reference/coreFeatures/schedulers.html) explains boundedElastic and subscription scheduling. [Boot R2DBC configuration](https://docs.spring.io/spring-boot/reference/data/sql.html#data.sql.r2dbc) defines the ConnectionFactory configuration reused here.

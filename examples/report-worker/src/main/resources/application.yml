@@ -1,0 +1,18 @@
+spring:
+  r2dbc:
+    url: ${TASKS_R2DBC_URL}
+    username: ${TASKS_DB_USER}
+    password: ${TASKS_DB_PASSWORD}
+    pool:
+      max-size: 8
+      initial-size: 0
+  sql:
+    init:
+      # Migrate explicitly with the application's migration tool before enabling workers.
+      # До включения worker примените миграцию явно инструментом вашего приложения.
+      mode: never
+pg-task-lease:
+  worker:
+    enabled: true
+reports:
+  directory: ${REPORTS_DIRECTORY:reports}

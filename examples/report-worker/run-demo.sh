@@ -21,4 +21,4 @@ port=$(docker port "$container_id" 5432/tcp)
 export TASKS_R2DBC_URL="r2dbc:postgresql://127.0.0.1:${port##*:}/reports_demo"
 export TASKS_DB_USER=report_demo TASKS_DB_PASSWORD=report_demo_only
 mvn -q package
-java -jar target/report-worker-0.1.0.jar
+java -jar target/report-worker-0.1.0.jar --server.port=0 --reports.verify=true

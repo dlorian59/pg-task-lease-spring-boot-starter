@@ -6,3 +6,4 @@ build/
 .env
 examples/*/target/
 examples/*/reports/
+examples/*/build/
